@@ -1,7 +1,7 @@
 package ssc;
 
 import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
+import org.jsoup.nodes.*;
 
 import javax.mail.Message;
 import javax.mail.Multipart;
@@ -21,6 +21,7 @@ import java.net.*;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpRequest.BodyPublishers;
+import org.apache.commons.lang3.StringUtils;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -125,8 +126,9 @@ public class Main {
         return false;
     }
 
-    private static boolean isEmpty(String str) {
-        return ((str == null) || (str.trim().equals("")));
+    private static boolean isEmpty(final String str)
+    {
+        return StringUtils.isEmpty(str);
     }
 
     private static String getMD5Hash(final String original) throws Throwable {
@@ -155,7 +157,7 @@ public class Main {
         return str;
     }
 
-    public String execute() throws Throwable {
+    public Content execute() throws Throwable {
         // Create a trust manager that does not validate certificate chains
         final TrustManager[] trustAllCerts = new TrustManager[]{
                 new X509TrustManager() {
@@ -204,16 +206,47 @@ public class Main {
 
         String html = doPostLogin(httpClient, map);
 
+        if (StringUtils.isEmpty(html))
+        {
+            throw new IOException("doPostLogin() HTML was empty!");
+        }
+
         final String gradebookLink = getGradebookLink(html);
+        if (StringUtils.isEmpty(gradebookLink))
+        {
+            throw new IOException("getGradebookLink() HTML was empty!");
+        }
 
         html = doGetGradeBook(httpClient, gradebookLink);
+        if (StringUtils.isEmpty(gradebookLink))
+        {
+            throw new IOException("doGetGradeBook() HTML was empty!");
+        }
 
         final Document document = Jsoup.parseBodyFragment(html);
-        String content = document.getElementById("gradebook-content").outerHtml();
-        content = content.trim();
+        if (document == null)
+        {
+            throw new IOException("document was null!");
+        }
 
-        final String md5Hash = getMD5Hash(content);
-        return md5Hash;
+        final Element element = document.getElementById("gradebook-content");
+        if (element == null)
+        {
+            throw new IOException("gradebook-content div tag not present in HTML!");
+        }
+
+        String gradebookContent = element.outerHtml();
+        if (StringUtils.isEmpty(gradebookContent))
+        {
+            throw new IOException("Gradebook content was empty!");
+        }
+        gradebookContent = gradebookContent.trim();
+        final String md5Hash = getMD5Hash(gradebookContent);
+
+        final Content content = new Content();
+        content.raw = gradebookContent;
+        content.hash = md5Hash;
+        return content;
     }
 
     public Map<String, String> doGetLoginPage(final HttpClient httpClient) throws IOException, InterruptedException {
@@ -355,7 +388,8 @@ public class Main {
 
 class ScheduledTask extends TimerTask {
 
-    private static String lastHash = null;
+    private static Content lastContent;
+
 
     private final String smtpHost;
     private final int smtpPort;
@@ -380,7 +414,7 @@ class ScheduledTask extends TimerTask {
         this.lcpsPassword = lcpsPassword;
     }
 
-    private void sendEmail() throws Throwable {
+    private void sendEmail(final String diff) throws Throwable {
         final Properties prop = new Properties();
         prop.put("mail.smtp.auth", true);
         prop.put("mail.smtp.starttls.enable", "true");
@@ -401,10 +435,10 @@ class ScheduledTask extends TimerTask {
                 Message.RecipientType.TO, InternetAddress.parse(smtpTo));
         message.setSubject("StudentVue Java Bot!");
 
-        String msg = "Check your Grades in StudentVue, they *may* have changed!!!";
+        String msg = "Check your Grades in StudentVue, they *may* have changed!!! " + new Date() + ". Diff below\n" + diff;
 
         MimeBodyPart mimeBodyPart = new MimeBodyPart();
-        mimeBodyPart.setContent(msg, "text/html");
+        mimeBodyPart.setContent(msg, "text/plain");
 
         Multipart multipart = new MimeMultipart();
         multipart.addBodyPart(mimeBodyPart);
@@ -419,16 +453,17 @@ class ScheduledTask extends TimerTask {
 
 
         try {
-            final String hash = main.execute();
-            if (lastHash == null) {
-                lastHash = hash;
+            final Content content = main.execute();
+            if (lastContent == null) {
+                lastContent = content;
             }
 
-            if (hash.equals(lastHash)) {
+            if (content.hash.equals(lastContent.hash)) {
             } else {
                 System.out.println("Hash Changed: " + new Date());
-                lastHash = hash;
-                sendEmail();
+                final String diff = StringUtils.difference(content.raw, lastContent.raw);
+                lastContent = content;
+                sendEmail(diff);
             }
 
         } catch (Throwable t) {
@@ -437,4 +472,10 @@ class ScheduledTask extends TimerTask {
         }
 
     }
+}
+
+class Content
+{
+    protected String hash;
+    protected String raw;
 }
