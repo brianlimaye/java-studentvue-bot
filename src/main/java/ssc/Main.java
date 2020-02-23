@@ -414,7 +414,7 @@ class ScheduledTask extends TimerTask {
         this.lcpsPassword = lcpsPassword;
     }
 
-    private void sendEmail(final String diff) throws Throwable {
+    private void sendEmail(final String subject, final String diff) throws Throwable {
         final Properties prop = new Properties();
         prop.put("mail.smtp.auth", true);
         prop.put("mail.smtp.starttls.enable", "true");
@@ -433,9 +433,9 @@ class ScheduledTask extends TimerTask {
         message.setFrom(new InternetAddress(smtpFrom));
         message.setRecipients(
                 Message.RecipientType.TO, InternetAddress.parse(smtpTo));
-        message.setSubject("StudentVue Java Bot!");
+        message.setSubject("StudentVue Java Bot! - " + subject);
 
-        String msg = "Check your Grades in StudentVue, they *may* have changed!!! " + new Date() + ". Diff below\n" + diff;
+        String msg = new Date() + ". Diff below\n" + diff;
 
         MimeBodyPart mimeBodyPart = new MimeBodyPart();
         mimeBodyPart.setContent(msg, "text/plain");
@@ -463,7 +463,13 @@ class ScheduledTask extends TimerTask {
                 System.out.println("Hash Changed: " + new Date());
                 final String diff = StringUtils.difference(content.raw, lastContent.raw);
                 lastContent = content;
-                sendEmail(diff);
+                if (hasGradesChanged(diff)) {
+                    sendEmail("Grades possibly changed!", diff);
+                }
+                else
+                {
+                    sendEmail("Content Only changed (We don't think grades changed)!", diff);
+                }
             }
 
         } catch (Throwable t) {
@@ -471,6 +477,19 @@ class ScheduledTask extends TimerTask {
             t.printStackTrace();
         }
 
+    }
+
+    public boolean hasGradesChanged(final String diff)
+    {
+        if (diff != null) {
+
+            int index1 = diff.indexOf("<span class=\"mark\"");
+            int index2 = diff.indexOf("<span class=\"score\">");
+
+            return index1 >= 0 || index2 >= 0;
+        }
+
+        return false;
     }
 }
 
